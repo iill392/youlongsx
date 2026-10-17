@@ -22,6 +22,8 @@
 
 #ifdef VM_WITH_QEMU
 #include "vm_qemu.h"
+#include "vmhost_input.h"
+#include "vm_guest_display.h"
 #endif
 
 #define TAG "VmEngine"
@@ -241,8 +243,17 @@ Java_com_vm_engine_VmEngine_start(JNIEnv* env, jclass clazz, jlong handle_ptr) {
         return;
     }
     handle->running = 1;
-    /* TODO(M0): 打开 qcow2、加载 kernel、启动 QEMU 主循环 */
-    LOGW("start: engine is a stub, QEMU is not wired in yet");
+#ifdef VM_WITH_QEMU
+    /* JNI 路径的配置来自 create(configJson)，同步到 s_config_json 后复用同一套
+       启动逻辑。NativeActivity 路径走 on_window_ready，两条路径不会同时触发
+       （vm_qemu_start 内部防重入，重复调用返回 -1）。 */
+    if (handle->config[0] != '\0') {
+        snprintf(s_config_json, sizeof(s_config_json), "%s", handle->config);
+    }
+    vm_engine_boot_qemu();
+#else
+    LOGW("start: engine built without QEMU (skeleton), nothing to boot");
+#endif
 }
 
 JNIEXPORT void JNICALL
@@ -265,8 +276,31 @@ JNIEXPORT void JNICALL
 Java_com_vm_engine_VmEngine_sendInput(JNIEnv* env, jclass clazz, jlong handle_ptr,
                                       jint type, jfloat x, jfloat y, jint code) {
     (void) handle_ptr;
-    /* TODO(M1): 注入 virtio-input */
-    LOGI("sendInput type=%d x=%.1f y=%.1f code=%d", type, x, y, code);
+#ifdef VM_WITH_QEMU
+    /* JNI 签名里没有 down/up 语义，这里实现为单次完整手势：
+       type=0 做一次点击（按下+抬起），type=1 做一次按键（按下+抬起）。
+       如需按住/多指等复杂手势，应扩展签名后另行实现。 */
+    if (type == 0) {
+        int gw = vm_guest_display_width();
+        int gh = vm_guest_display_height();
+        if (gw <= 0) gw = 1;
+        if (gh <= 0) gh = 1;
+        const int gx = (int) x;
+        const int gy = (int) y;
+        LOGI("sendInput: tap at guest (%d,%d)", gx, gy);
+        vmhost_input_touch(0, gx, gy, gw, gh, true);
+        vmhost_input_touch(0, gx, gy, gw, gh, false);
+    } else if (type == 1) {
+        LOGI("sendInput: key %d", (int) code);
+        vmhost_input_key((int) code, true);
+        vmhost_input_key((int) code, false);
+    } else {
+        LOGW("sendInput: unknown type %d (want 0=touch, 1=key)", (int) type);
+    }
+#else
+    LOGI("sendInput type=%d x=%.1f y=%.1f code=%d (skeleton, ignored)",
+         (int) type, (double) x, (double) y, (int) code);
+#endif
 }
 
 JNIEXPORT void JNICALL
