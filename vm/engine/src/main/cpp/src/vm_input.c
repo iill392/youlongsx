@@ -21,9 +21,10 @@
 #include "vm_render.h"
 #include "vm_guest_display.h"
 
-#ifdef VM_WITH_QEMU
+/* vmhost_input.h 只是纯接口头文件（无 QEMU 依赖），无条件引入，
+   否则骨架模式（未定义 VM_WITH_QEMU）下 VMHOST_TOUCH_SLOTS 未定义，
+   alloc_slot() 编译失败。 */
 #include "vmhost_input.h"
-#endif
 
 #define TAG "VmInput"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
